@@ -7,30 +7,33 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [frameCount, setFrameCount] = useState(null);
   const [error, setError] = useState(null);
-  const [file, setFile] = useState(null); // Store the selected file
-
-  
+  const [file, setFile] = useState(null);
 
   const handleDrop = async (acceptedFiles: any) => {
-
-
+  
     setFile(acceptedFiles[0]);
     setError(null);
 
     try {
-      if (file) { // Ensure a file is selected before proceeding
+      if (file) {
         const formData = new FormData();
-        formData.append('file', file); // Append the file object
-  
+        formData.append('file', file);
+
         setLoading(true);
 
-        const response = await fetch('/pages/api/frames.ts', {
+        console.log(formData)
+
+        const response = await fetch('http://localhost:8080/api/frames', { 
           method: 'POST',
-          body: file,
+          body: formData, // Use formData for file uploads
         });
 
-        
+        if (!response.ok) {
+          throw new Error(`API request failed with status ${response.status}`);
+        }
+
         const data = await response.json();
+        console.log(data)
         setFrameCount(data.frameCount);
       }
     } catch (error: any) {
