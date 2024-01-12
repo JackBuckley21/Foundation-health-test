@@ -4,14 +4,8 @@ import cors from 'cors';
 import multer from 'multer';
 
 
-const bitrateTable = [
-  32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 512, 576
-];
-
-const samplingRateTable = [
-  44100, 48000, 32000, 22050, 24000, 16000, 11025, 12000, 8000
-];
-
+const bitrateTable = [32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384];
+const samplingRateTable = [44100, 48000, 32000];
 
 
 
@@ -30,42 +24,78 @@ expressApp.post('/api/frames',  upload.single('file'), async (req, res) => {
     try {
       const mp3Data = req.file.buffer;
 
-        let frameCount = 0;
-        const id3TagSize = mp3Data.readBigInt64BE(0); 
-        let offset = id3TagSize; 
-        
-        
-            while (offset < mp3Data.length) {
-              // Check for sync word (0xFFE0 to 0xFFE7)
-              if (mp3Data[offset] == 0xff && (mp3Data[offset + 1] & 0xe0) == 0xe0) {
-                console.log('wwwo')
-                frameCount++;
-                offset += 4;
-                // Extract bitrate index, sampling rate index, and padding bit from the frame header
-                const bitrateIndex = (mp3Data[offset + 2] & 0xf0) >> 4;
-                const samplingRateIndex = (mp3Data[offset + 2] & 0x0c) >> 2;
-                const paddingBit = (mp3Data[offset + 2] & 0x02) >> 1;
-        
-                let frameLength =
-                  (144 * bitrateTable[bitrateIndex]) /
-                  (samplingRateTable[samplingRateIndex] + paddingBit);
-                frameLength = Math.floor(frameLength); // Convert to integer
-        
-                // Add an extra byte if padding is present
-                if (paddingBit) {
-                  frameLength++;
-                }
-        
-                // Move to the next frame
-                offset += frameLength;
-              } else {
-            
-                throw new Error("Invalid MP3 data");
-              }
-            }
-        
-            // Send the JSON response with the frame count
-            res.status(200).json({ frames: frameCount });
+      let offset = 0;
+
+      // Check for an ID3 tag
+      const id3TagIdentifier = 'ID3';
+
+      // Check for ID3v2 tag
+      if (mp3Data.slice(0, 3).toString() === id3TagIdentifier) {
+          // Extract ID3v2 tag size from the header
+          const id3TagSize =
+              ((mp3Data[6] & 0x7F) << 21) |
+              ((mp3Data[7] & 0x7F) << 14) |
+              ((mp3Data[8] & 0x7F) << 7) |
+              (mp3Data[9] & 0x7F);
+      
+          // Skip over the ID3v2 tag
+          offset = id3TagSize + id3TagIdentifier.length;
+      
+      }
+      
+
+      let frameCount = 0;
+      const frameSize = 4;
+
+     
+      while (offset < mp3Data.length) {
+        // Search for MP3 frame sync (0xFFE0 to 0xFFE7)
+        while (offset < mp3Data.length - 1 && (mp3Data[offset] !== 0xFF || (mp3Data[offset + 1] & 0xE0) !== 0xE0)) {
+            offset++;
+        }
+    
+        if (offset >= mp3Data.length - 1) {
+            // No more sync words found, exit the loop
+            break;
+        }
+    
+    
+        frameCount++;
+        offset += 4;
+    
+        if (offset + 4 > mp3Data.length) {
+            // Insufficient data for a complete frame, exit the loop
+            break;
+        }
+    
+        const headerBytes = mp3Data.slice(offset - 4, offset);
+    
+        console.log(`Header Bytes: ${headerBytes.toString('hex')}`);
+    
+        const syncBits = ((headerBytes[0] << 4) | (headerBytes[1] >>> 4)) & 0x0FFF;
+        const bitrateIndex = (headerBytes[2] & 0xF0) >>> 4;
+        const samplingRateIndex = (headerBytes[2] & 0x0F) >>> 2 | ((headerBytes[1] & 0x0003) << 2);
+        const paddingBit = (headerBytes[1] & 0x0002) >>> 1;
+    
+        console.log(`Sync Bits: ${syncBits.toString(16)}`);
+        console.log(`Bitrate Index: ${bitrateIndex}`);
+        console.log(`Sampling Rate Index: ${samplingRateIndex}`);
+        console.log(`Padding Bit: ${paddingBit}`);
+    
+        if (bitrateIndex >= 0 && bitrateIndex < bitrateTable.length && samplingRateIndex >= 0 && samplingRateIndex < samplingRateTable.length) {
+            // Valid indices, proceed with frame length extraction
+            const frameLengthBytes = mp3Data.slice(offset, offset + 4);
+            const frameLength = ((frameLengthBytes[1] & 0x000000FF) << 16) | (frameLengthBytes[2] << 8) | frameLengthBytes[3];
+    
+            console.log(`Frame Length: ${frameLength}`);
+    
+            // Move to the next potential frame
+            offset += frameLength;
+        } 
+    }
+      // Send the JSON response with the frame count
+      console.log(frameCount)
+        res.status(200).json({ frames: frameCount });
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Failed to process MP3 file' });
